@@ -77,23 +77,31 @@ install_pd_tool() {
   go install "$gopkg" && warn "ensure \$(go env GOPATH)/bin is on your PATH"
 }
 
-# httpx needs special care: on Kali the apt package is 'httpx-toolkit', and the
-# Python 'httpx' CLI can shadow ProjectDiscovery's on PATH.
+# httpx needs special care: on Kali the apt package 'httpx-toolkit' installs the
+# ProjectDiscovery binary AS `httpx-toolkit` (the plain `httpx` is the unrelated
+# Python client). MooseMap auto-detects `httpx-toolkit`, so no env var is needed.
+pd_httpx_present() {
+  # True if either `httpx` or `httpx-toolkit` is ProjectDiscovery's.
+  { have httpx         && httpx         -version 2>&1 | grep -qi projectdiscovery; } ||
+  { have httpx-toolkit && httpx-toolkit -version 2>&1 | grep -qi projectdiscovery; }
+}
+
 install_pd_httpx() {
-  if have httpx && httpx -version 2>&1 | grep -qi projectdiscovery; then
+  if pd_httpx_present; then
     say "ProjectDiscovery httpx already present"; return
   fi
   if apt_install httpx-toolkit; then
-    say "installed httpx-toolkit (ProjectDiscovery httpx)"
+    say "installed httpx-toolkit (ProjectDiscovery httpx; invoked as 'httpx-toolkit' on Kali)"
   else
     warn "httpx-toolkit not available via apt; trying 'go install'"
     ensure_go
     go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
       && warn "ensure \$(go env GOPATH)/bin precedes any Python httpx on PATH"
   fi
-  if have httpx && ! httpx -version 2>&1 | grep -qi projectdiscovery; then
-    warn "the 'httpx' on PATH does not look like ProjectDiscovery's."
-    warn "set MOOSEMAP_HTTPX to the PD binary, e.g. MOOSEMAP_HTTPX=\$(go env GOPATH)/bin/httpx"
+  if pd_httpx_present; then
+    say "ProjectDiscovery httpx ready (MooseMap auto-detects 'httpx-toolkit')"
+  else
+    warn "could not verify a ProjectDiscovery httpx; set MOOSEMAP_HTTPX to its path"
   fi
 }
 

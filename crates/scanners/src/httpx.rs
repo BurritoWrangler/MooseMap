@@ -19,18 +19,49 @@ use std::collections::BTreeSet;
 
 const HTTPX: &str = "httpx";
 
+/// On Kali, ProjectDiscovery's httpx is packaged as `httpx-toolkit` to avoid a
+/// name clash with the Python httpx client. We try this automatically when the
+/// plain `httpx` on PATH isn't the ProjectDiscovery tool.
+const HTTPX_KALI: &str = "httpx-toolkit";
+
 use moosemap_core::engine::StageOutcome as Outcome;
 
 /// Resolve + verify the httpx binary, returning either the usable binary name or
-/// a `Skipped` outcome explaining why we won't run (missing, or the Python httpx
-/// shadowing ProjectDiscovery's on Kali). Centralizes the Kali gotcha.
+/// a `Skipped` outcome explaining why we won't run.
+///
+/// Resolution order:
+/// 1. An explicit `MOOSEMAP_HTTPX` override (honored as-is).
+/// 2. `httpx` on PATH, if it verifies as ProjectDiscovery's.
+/// 3. `httpx-toolkit` on PATH (Kali's name for PD httpx) as an automatic fallback.
+///
+/// This means a stock Kali install "just works" without needing the env var.
 async fn resolve_httpx() -> Result<String, Outcome> {
-    let bin = tool::resolve_binary(HTTPX);
-    match tool::verify_projectdiscovery(&bin, "httpx").await {
-        tool::ToolCheck::Ok => Ok(bin),
-        tool::ToolCheck::Missing => {
-            Err(Outcome::Skipped("httpx not installed".into()))
+    // If the operator set MOOSEMAP_HTTPX, trust it (resolve_binary returns it).
+    let overridden = tool::resolve_binary(HTTPX);
+    if overridden != HTTPX {
+        return match tool::verify_projectdiscovery(&overridden, "httpx").await {
+            tool::ToolCheck::Ok => Ok(overridden),
+            tool::ToolCheck::Missing => {
+                Err(Outcome::Skipped(format!("{overridden} (MOOSEMAP_HTTPX) not found")))
+            }
+            tool::ToolCheck::Wrong(reason) => Err(Outcome::Skipped(reason)),
+        };
+    }
+
+    // Try plain `httpx` first.
+    match tool::verify_projectdiscovery(HTTPX, "httpx").await {
+        tool::ToolCheck::Ok => return Ok(HTTPX.to_string()),
+        tool::ToolCheck::Missing | tool::ToolCheck::Wrong(_) => {
+            // Fall through to the Kali-packaged name.
         }
+    }
+
+    // Automatic Kali fallback: httpx-toolkit.
+    match tool::verify_projectdiscovery(HTTPX_KALI, "httpx").await {
+        tool::ToolCheck::Ok => Ok(HTTPX_KALI.to_string()),
+        tool::ToolCheck::Missing => Err(Outcome::Skipped(
+            "httpx not installed (tried `httpx` and `httpx-toolkit`)".into(),
+        )),
         tool::ToolCheck::Wrong(reason) => Err(Outcome::Skipped(reason)),
     }
 }

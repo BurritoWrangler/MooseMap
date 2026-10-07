@@ -136,12 +136,7 @@ pub async fn tool_report() -> Vec<ToolStatus> {
             "sudo apt install -y subfinder  # or: go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
         )
         .await,
-        pd(
-            "httpx",
-            "web recon (HTTP probing, tech/title)",
-            "sudo apt install -y httpx-toolkit  # PD httpx; avoid the Python 'httpx' CLI",
-        )
-        .await,
+        httpx_status().await,
         pd(
             "nuclei",
             "template-based vulnerability scanning",
@@ -149,4 +144,63 @@ pub async fn tool_report() -> Vec<ToolStatus> {
         )
         .await,
     ]
+}
+
+/// Doctor status for httpx, mirroring the adapter's resolution order:
+/// MOOSEMAP_HTTPX override, then `httpx`, then Kali's `httpx-toolkit`. Reports
+/// which binary will actually be used so the GUI readiness panel matches reality.
+async fn httpx_status() -> ToolStatus {
+    const ROLE: &str = "web recon (HTTP probing, tech/title)";
+    const HINT: &str =
+        "sudo apt install -y httpx-toolkit  # Kali packages PD httpx as `httpx-toolkit`";
+
+    // Candidate binaries in priority order; the override (if any) comes first.
+    let override_bin = tool::resolve_binary("httpx");
+    let mut candidates: Vec<String> = Vec::new();
+    if override_bin != "httpx" {
+        candidates.push(override_bin);
+    }
+    candidates.push("httpx".to_string());
+    candidates.push("httpx-toolkit".to_string());
+
+    let mut last_wrong: Option<(String, String)> = None;
+    for bin in &candidates {
+        match tool::verify_projectdiscovery(bin, "httpx").await {
+            tool::ToolCheck::Ok => {
+                return ToolStatus {
+                    name: "httpx",
+                    resolved_path: tool::which(bin).map(|p| p.display().to_string()),
+                    state: "ok",
+                    detail: format!("verified ProjectDiscovery httpx (`{bin}`)"),
+                    role: ROLE,
+                    install_hint: HINT,
+                };
+            }
+            tool::ToolCheck::Wrong(reason) => {
+                last_wrong = Some((bin.clone(), reason));
+            }
+            tool::ToolCheck::Missing => {}
+        }
+    }
+
+    // Nothing verified. If something was present but wrong (e.g. the Python
+    // httpx shadowing and no httpx-toolkit), surface that; else report missing.
+    match last_wrong {
+        Some((bin, reason)) => ToolStatus {
+            name: "httpx",
+            resolved_path: tool::which(&bin).map(|p| p.display().to_string()),
+            state: "wrong",
+            detail: reason,
+            role: ROLE,
+            install_hint: HINT,
+        },
+        None => ToolStatus {
+            name: "httpx",
+            resolved_path: None,
+            state: "missing",
+            detail: "httpx not found (tried `httpx` and `httpx-toolkit`)".into(),
+            role: ROLE,
+            install_hint: HINT,
+        },
+    }
 }
