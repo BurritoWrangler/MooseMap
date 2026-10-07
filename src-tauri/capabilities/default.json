@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core window permissions for the MooseMap main window. The GUI is served by the embedded HTTP server and uses standard fetch/WebSocket to its own origin, so no custom Tauri IPC commands are exposed.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
+}

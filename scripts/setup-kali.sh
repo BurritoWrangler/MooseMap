@@ -13,16 +13,20 @@
 #   ./scripts/setup-kali.sh            # install everything
 #   ./scripts/setup-kali.sh --tools    # external scanning tools only
 #   ./scripts/setup-kali.sh --no-node  # skip Node.js (API/CLI only, no GUI)
+#   ./scripts/setup-kali.sh --desktop  # also install Tauri desktop-app deps
+#                                       # (WebKitGTK, build tools, tauri-cli)
 
 set -euo pipefail
 
 WITH_NODE=1
 TOOLS_ONLY=0
+WITH_DESKTOP=0
 for arg in "$@"; do
   case "$arg" in
     --no-node) WITH_NODE=0 ;;
     --tools)   TOOLS_ONLY=1 ;;
-    -h|--help) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --desktop) WITH_DESKTOP=1 ;;
+    -h|--help) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -134,15 +138,48 @@ install_node() {
 }
 
 # ---------------------------------------------------------------------------
+# Desktop app (Tauri) build dependencies.
+#
+# Tauri on Linux needs WebKitGTK + GTK dev headers and a few build tools, plus
+# the Tauri CLI for bundling and icon generation. librsvg2-bin provides
+# rsvg-convert for turning the SVG into PNG/ICO/ICNS icon sets.
+# ---------------------------------------------------------------------------
+install_desktop_deps() {
+  say "installing Tauri desktop build dependencies"
+  apt_install \
+    libwebkit2gtk-4.1-dev \
+    build-essential \
+    curl wget file \
+    libxdo-dev \
+    libssl-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev librsvg2-bin \
+    || warn "some Tauri system deps failed to install"
+
+  # Tauri CLI (provides `cargo tauri dev|build|icon`).
+  if cargo tauri --version >/dev/null 2>&1; then
+    say "tauri-cli already present"
+  else
+    say "installing tauri-cli (cargo install tauri-cli)"
+    cargo install tauri-cli --version '^2' --locked \
+      || warn "could not install tauri-cli; 'cargo tauri' commands will be unavailable"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 main() {
   install_scanning_tools
   if [ "$TOOLS_ONLY" -eq 0 ]; then
     install_rust
     [ "$WITH_NODE" -eq 1 ] && install_node
+    [ "$WITH_DESKTOP" -eq 1 ] && install_desktop_deps
   fi
 
   say "done. verify with:"
   echo "    cargo run -p moosemap-cli -- tools"
+  if [ "$WITH_DESKTOP" -eq 1 ]; then
+    echo "    make app-build   # build the desktop app (.deb/AppImage)"
+  fi
   echo
   warn "reminder: only scan assets you are explicitly authorized to test."
 }

@@ -144,23 +144,51 @@ the terminal.
 4. **Export the report** — on a finished run, download the prioritized report
    as **Markdown** or **JSON** from the run header.
 
-### Install as a desktop app (menu icon)
+### Native desktop app (own window, no browser)
 
-To launch MooseMap from the Kali applications menu instead of the terminal:
+MooseMap can run as a self-contained desktop application built with
+[Tauri](https://tauri.app): it starts the server **in-process** and shows the
+GUI in its own native window — no terminal, no separate browser tab.
 
 ```bash
-make build            # ensure the release binary + GUI are built
+./scripts/setup-kali.sh --desktop   # WebKitGTK + build tools + tauri-cli
+make app-dev                        # run in dev mode (hot-reload GUI)
+make app-build                      # bundle a .deb / AppImage you can install
+```
+
+`make app-build` produces an installable package under
+`src-tauri/target/release/bundle/` that drops MooseMap into your applications
+menu with its icon, like any other app. Closing the window stops the embedded
+server (and the whole process) — intentional for a scanning tool.
+
+The desktop app reuses the exact same GUI, API, and live event stream as the
+server mode; it just hosts them in a window. `MOOSEMAP_DB` / `MOOSEMAP_ADDR`
+still apply if you want to point it at a specific database or port.
+
+### Lightweight menu launcher (browser-based)
+
+If you'd rather not build the native app, you can add a menu entry that starts
+the server and opens the GUI in your default browser:
+
+```bash
+make build            # release binary + GUI
 make install-desktop  # add the menu entry + icon (user-level, no sudo)
 ```
 
 This installs a launcher to `~/.local/bin`, the icon to the hicolor theme, and a
-`moosemap.desktop` entry to `~/.local/share/applications`, then refreshes the
-menu cache. Look for **MooseMap** in the Applications menu (under Security /
-Network). Clicking it opens a terminal that starts the server and launches the
-GUI in your browser; close that terminal (or Ctrl-C) to stop the server.
+`moosemap.desktop` entry to `~/.local/share/applications`. Clicking it opens a
+terminal that runs the server and launches the browser GUI; close it to stop.
 
 - System-wide (all users): `./scripts/install-desktop.sh --system` (uses sudo).
 - Remove it: `make uninstall-desktop`.
+
+### Three ways to run, summarized
+
+| Mode | Command | What you get |
+|---|---|---|
+| **Native desktop app** | `make app-build` then launch MooseMap | Own window, no browser/terminal |
+| **Menu launcher** | `make install-desktop` | Menu icon → terminal + browser GUI |
+| **Server / headless** | `make run` (or `moosemap serve`) | Browser GUI; good for remote/VM use |
 
 ### Running without Make
 

@@ -57,6 +57,31 @@ dev: ## Run backend (cargo) + frontend dev server; use two terminals
 	@echo "Terminal 1:  $(CARGO) run -p moosemap-cli -- serve"
 	@echo "Terminal 2:  cd $(FRONTEND) && $(NPM) run dev   # http://localhost:5173"
 
+# --- Desktop app (Tauri: native window, no browser) ---------------------------
+
+.PHONY: app-icons
+app-icons: ## Generate the desktop app icons from assets/moosemap.svg
+	@command -v cargo-tauri >/dev/null 2>&1 || $(CARGO) tauri --version >/dev/null 2>&1 || { \
+	  echo "tauri-cli not found; run: ./scripts/setup-kali.sh --desktop"; exit 1; }
+	$(CARGO) tauri icon assets/moosemap.svg --output src-tauri/icons
+
+.PHONY: app-dev
+app-dev: ## Run the desktop app in dev mode (hot-reload GUI in a native window)
+	$(CARGO) tauri dev
+
+.PHONY: app-build
+app-build: ## Build the desktop app bundle (.deb / AppImage)
+	@$(MAKE) app-icons || echo "continuing with existing icons"
+	$(CARGO) tauri build
+
+.PHONY: app
+app: ## Run the built desktop app binary (debug build if needed)
+	@if [ -x target/release/moosemap-desktop ]; then \
+	  target/release/moosemap-desktop; \
+	else \
+	  $(CARGO) run -p moosemap-desktop; \
+	fi
+
 .PHONY: doctor
 doctor: ## Check which scanning tools are installed and resolve correctly
 	$(CARGO) run -q -p moosemap-cli -- tools

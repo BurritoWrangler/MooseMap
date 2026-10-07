@@ -1,0 +1,29 @@
+[package]
+name = "moosemap-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "MooseMap desktop app (native window around the MooseMap GUI)"
+
+# The Tauri binary. `moosemap-desktop` wraps the in-process axum server + the
+# React GUI in a native webview window.
+[[bin]]
+name = "moosemap-desktop"
+path = "src/main.rs"
+
+[lib]
+name = "moosemap_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+moosemap-server = { path = "../crates/server" }
+tauri = { version = "2", features = [] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

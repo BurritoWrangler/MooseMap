@@ -16,6 +16,17 @@ frontend/dist/
 frontend/.vite/
 *.local
 
+# Tauri (desktop app) build output + generated icons
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/*.icns
+src-tauri/icons/*.ico
+src-tauri/icons/icon.png
+src-tauri/icons/Square*.png
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/android/
+src-tauri/icons/ios/
+
 # Env / secrets
 .env
 .env.*
