@@ -221,3 +221,66 @@ async fn host_target_flows_discovery_to_vuln_and_scope_is_enforced() {
     assert!(report.findings.iter().any(|f| f.severity == Severity::High));
     assert!(report.summary.actionable >= 1);
 }
+
+// ---------------------------------------------------------------------------
+// CVE correlation: a known-vulnerable banner yields a prioritized CVE finding.
+// ---------------------------------------------------------------------------
+
+use moosemap_scanners::cve::CveCorrelation;
+
+/// Seeds a vsftpd 2.3.4 service (the backdoored release, CVE-2011-2523, KEV).
+struct FakeVulnService;
+
+#[async_trait]
+impl StageExecutor for FakeVulnService {
+    fn stage(&self) -> Stage {
+        Stage::ServiceEnum
+    }
+    fn name(&self) -> &str {
+        "fake-vuln-service"
+    }
+    async fn execute(&self, ctx: &StageContext) -> anyhow::Result<StageOutcome> {
+        let mut st = ctx.state.lock().await;
+        st.services.push(Service {
+            target: Target::Ip("192.0.2.50".parse().unwrap()),
+            port: 21,
+            protocol: Protocol::Tcp,
+            state: PortState::Open,
+            service_name: Some("ftp".into()),
+            product: Some("vsftpd".into()),
+            version: Some("2.3.4".into()),
+        });
+        Ok(StageOutcome::Completed)
+    }
+}
+
+#[tokio::test]
+async fn cve_correlation_emits_prioritized_cve_finding() {
+    let engine = Engine::new(
+        vec![Arc::new(FakeVulnService), Arc::new(CveCorrelation)],
+        256,
+    );
+    let run = Run::new("cve", vec!["192.0.2.0/24".into()]);
+    let scope = Arc::new(ScopeGuard::from_input("192.0.2.0/24").unwrap());
+
+    let result = engine.run(&run, scope).await;
+    assert_eq!(result.status, moosemap_core::RunStatus::Completed);
+
+    // A CVE-2011-2523 finding should exist, Critical + Active (KEV), from the
+    // cve-correlation source, carrying the CVE and an EPSS reference.
+    let cve = result
+        .findings
+        .iter()
+        .find(|f| f.title.contains("CVE-2011-2523"))
+        .expect("expected a CVE-2011-2523 finding");
+    assert_eq!(cve.severity, Severity::Critical);
+    assert_eq!(cve.exploitability, moosemap_core::Exploitability::Active);
+    assert_eq!(cve.source, "cve-correlation");
+    assert!(cve.references.iter().any(|r| r == "CVE-2011-2523"));
+    assert!(cve.references.iter().any(|r| r.starts_with("EPSS:")));
+
+    // After prioritization it should outrank a plain informational finding.
+    let mut findings = result.findings;
+    prioritize::prioritize(&mut findings);
+    assert!(findings[0].title.contains("CVE-2011-2523"));
+}

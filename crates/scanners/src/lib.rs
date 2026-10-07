@@ -9,6 +9,7 @@
 //! - [`httpx`] — web recon: confirms live HTTP(S) endpoints from open services.
 //! - [`nuclei`] — template-based vulnerability scanning of web endpoints.
 //! - [`heuristics`] — version-based vuln heuristics (no external tool required).
+//! - [`cve`] — curated offline CVE correlation from service version banners.
 //!
 //! ## Planned (stubbed, skip gracefully)
 //! - [`stubs::MasscanPortScan`] (high-rate port sweeping).
@@ -19,6 +20,7 @@ use std::sync::Arc;
 
 use moosemap_core::StageExecutor;
 
+pub mod cve;
 pub mod heuristics;
 pub mod httpx;
 pub mod nmap;
@@ -26,6 +28,7 @@ pub mod nuclei;
 pub mod stubs;
 pub mod subfinder;
 pub mod tool;
+pub mod version;
 
 /// The default set of stage executors for a standard external assessment.
 ///
@@ -47,9 +50,13 @@ pub fn default_executors() -> Vec<Arc<dyn StageExecutor>> {
         Arc::new(nmap::NmapServiceEnum),
         // Web recon
         Arc::new(httpx::HttpxWebRecon),
-        // Vulnerability scanning: real scanner first, then always-on heuristics.
+        // Vulnerability scanning: real scanner first, then always-on offline
+        // checks (version heuristics + curated CVE correlation). CVE
+        // correlation runs after nuclei so it can dedup against nuclei's
+        // confirmed CVE findings.
         Arc::new(nuclei::NucleiVulnScan),
         Arc::new(heuristics::VersionHeuristics),
+        Arc::new(cve::CveCorrelation),
         // Prioritize + Report stages are provided by the orchestrator layer
         // (see moosemap-report), not by scanners.
     ]
