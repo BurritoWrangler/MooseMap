@@ -169,6 +169,23 @@ if ! cargo tauri --version >/dev/null 2>&1; then
   die "tauri-cli not found. Run: ./scripts/install-app.sh --setup  (installs it)"
 fi
 
+# --- frontend dependencies ---------------------------------------------------
+# The Tauri build runs `npm run build` (tsc + vite), whose binaries live in
+# frontend/node_modules/.bin. Install them first (idempotent; `npm ci` when a
+# lockfile is present, else `npm install`). Without this, the build fails with
+# "tsc: not found" (exit 127).
+if [ ! -x frontend/node_modules/.bin/tsc ]; then
+  say "installing frontend dependencies (npm)…"
+  if [ -f frontend/package-lock.json ]; then
+    npm --prefix frontend ci || npm --prefix frontend install \
+      || die "npm install for the frontend failed"
+  else
+    npm --prefix frontend install || die "npm install for the frontend failed"
+  fi
+else
+  say "frontend dependencies already installed"
+fi
+
 # --- icons -------------------------------------------------------------------
 say "generating app icons from assets/moosemap.svg"
 cargo tauri icon assets/moosemap.svg --output src-tauri/icons \
