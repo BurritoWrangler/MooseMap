@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# setup-kali.sh — provision a Kali/Debian VM to build and run MooseMap.
+#
+# Installs: the external scanning tools (nmap, masscan, subfinder, httpx,
+# nuclei), the Rust toolchain, and Node.js for the GUI. Idempotent: safe to
+# re-run. After it finishes, verify with `cargo run -p moosemap-cli -- tools`.
+#
+# Authorized use only. MooseMap performs active scanning — only run it against
+# assets you are explicitly authorized to test.
+#
+# Usage:
+#   ./scripts/setup-kali.sh            # install everything
+#   ./scripts/setup-kali.sh --tools    # external scanning tools only
+#   ./scripts/setup-kali.sh --no-node  # skip Node.js (API/CLI only, no GUI)
+
+set -euo pipefail
+
+WITH_NODE=1
+TOOLS_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-node) WITH_NODE=0 ;;
+    --tools)   TOOLS_ONLY=1 ;;
+    -h|--help) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Prefix privileged commands with sudo only if we aren't already root.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  if have sudo; then SUDO="sudo"; else
+    warn "not root and sudo not found; apt installs may fail"
+  fi
+fi
+
+apt_install() {
+  say "apt install: $*"
+  $SUDO apt-get update -y
+  $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+}
+
+# ---------------------------------------------------------------------------
+# External scanning tools
+# ---------------------------------------------------------------------------
+install_scanning_tools() {
+  # nmap + masscan are in the Kali/Debian repos.
+  have nmap    || apt_install nmap    || warn "could not install nmap"
+  have masscan || apt_install masscan || warn "could not install masscan"
+
+  # ProjectDiscovery tools: try apt first (Kali packages them), then go install.
+  install_pd_tool subfinder \
+    "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+  install_pd_tool nuclei \
+    "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+  install_pd_httpx
+
+  # Pull nuclei templates (first run otherwise does this mid-scan).
+  if have nuclei; then
+    say "updating nuclei templates"
+    nuclei -update-templates -silent || warn "nuclei template update failed (network?)"
+  fi
+}
+
+# Install a ProjectDiscovery tool: apt package of the same name, else go install.
+install_pd_tool() {
+  local name="$1" gopkg="$2"
+  if have "$name"; then say "$name already present"; return; fi
+  if apt_install "$name"; then return; fi
+  warn "$name not available via apt; trying 'go install'"
+  ensure_go
+  go install "$gopkg" && warn "ensure \$(go env GOPATH)/bin is on your PATH"
+}
+
+# httpx needs special care: on Kali the apt package is 'httpx-toolkit', and the
+# Python 'httpx' CLI can shadow ProjectDiscovery's on PATH.
+install_pd_httpx() {
+  if have httpx && httpx -version 2>&1 | grep -qi projectdiscovery; then
+    say "ProjectDiscovery httpx already present"; return
+  fi
+  if apt_install httpx-toolkit; then
+    say "installed httpx-toolkit (ProjectDiscovery httpx)"
+  else
+    warn "httpx-toolkit not available via apt; trying 'go install'"
+    ensure_go
+    go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
+      && warn "ensure \$(go env GOPATH)/bin precedes any Python httpx on PATH"
+  fi
+  if have httpx && ! httpx -version 2>&1 | grep -qi projectdiscovery; then
+    warn "the 'httpx' on PATH does not look like ProjectDiscovery's."
+    warn "set MOOSEMAP_HTTPX to the PD binary, e.g. MOOSEMAP_HTTPX=\$(go env GOPATH)/bin/httpx"
+  fi
+}
+
+ensure_go() {
+  have go && return
+  apt_install golang-go || warn "could not install Go; PD tool install may fail"
+}
+
+# ---------------------------------------------------------------------------
+# Rust toolchain
+# ---------------------------------------------------------------------------
+install_rust() {
+  if have cargo; then say "cargo already present ($(cargo --version))"; return; fi
+  say "installing Rust via rustup"
+  if have curl; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    # shellcheck disable=SC1090
+    . "$HOME/.cargo/env"
+  else
+    apt_install rustc cargo || warn "could not install Rust"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Node.js (for the web GUI)
+# ---------------------------------------------------------------------------
+install_node() {
+  if have npm; then say "npm already present ($(npm --version))"; return; fi
+  apt_install nodejs npm || warn "could not install Node.js/npm"
+}
+
+# ---------------------------------------------------------------------------
+main() {
+  install_scanning_tools
+  if [ "$TOOLS_ONLY" -eq 0 ]; then
+    install_rust
+    [ "$WITH_NODE" -eq 1 ] && install_node
+  fi
+
+  say "done. verify with:"
+  echo "    cargo run -p moosemap-cli -- tools"
+  echo
+  warn "reminder: only scan assets you are explicitly authorized to test."
+}
+
+main

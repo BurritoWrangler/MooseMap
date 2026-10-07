@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MooseMap</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: #0b1120; color: #e5e7eb;
+    }
+    main { max-width: 42rem; padding: 2rem; }
+    h1 { font-size: 1.75rem; margin: 0 0 .5rem; }
+    code { background: rgba(255,255,255,.1); padding: .15rem .4rem; border-radius: .25rem; }
+    a { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MooseMap API is running</h1>
+    <p>The backend is up, but the web GUI has not been built yet.</p>
+    <p>Build the frontend, then restart the server:</p>
+    <pre><code>cd frontend
+npm install
+npm run build</code></pre>
+    <p>Or run the dev server (<code>npm run dev</code>) which proxies the API.</p>
+    <p>API health check: <a href="/api/health">/api/health</a></p>
+  </main>
+</body>
+</html>

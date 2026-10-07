@@ -1,0 +1,23 @@
+[package]
+name = "moosemap-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "moosemap"
+path = "src/main.rs"
+
+[dependencies]
+moosemap-core = { path = "../core" }
+moosemap-scanners = { path = "../scanners" }
+moosemap-report = { path = "../report" }
+moosemap-server = { path = "../server" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
