@@ -33,7 +33,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Launch the API + WebSocket server (serves the web GUI).
+    /// Headless/remote mode: run the server only (browser GUI over HTTP).
+    /// For the normal desktop experience, launch the MooseMap app instead.
     Serve(ServeArgs),
     /// Run a headless assessment and write a report.
     Scan(ScanArgs),
@@ -56,6 +57,10 @@ struct ServeArgs {
     /// Directory of built frontend assets to serve.
     #[arg(long, env = "MOOSEMAP_FRONTEND", default_value = "frontend/dist")]
     frontend_dir: PathBuf,
+    /// Open the GUI in a browser after starting (off by default; this is the
+    /// headless/remote mode — the native desktop app is the primary interface).
+    #[arg(long, default_value_t = false)]
+    open: bool,
 }
 
 #[derive(Parser)]
@@ -109,9 +114,11 @@ async fn run_serve(args: ServeArgs) -> anyhow::Result<()> {
         addr: args.addr,
         database_url: args.database_url,
         frontend_dir,
+        open_browser: args.open,
     };
-    // serve() prints the clickable URL and opens the browser (unless
-    // MOOSEMAP_NO_OPEN is set).
+    // Headless/remote mode: serves the GUI over HTTP and prints the URL. Pass
+    // --open to also launch a local browser. For the normal desktop experience,
+    // run the MooseMap app instead (it opens its own window).
     serve(config).await
 }
 

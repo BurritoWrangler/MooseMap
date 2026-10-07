@@ -27,6 +27,10 @@ pub struct ServerConfig {
     pub database_url: String,
     /// Directory of built frontend assets to serve, if any.
     pub frontend_dir: Option<PathBuf>,
+    /// Open the GUI in a browser after binding. Off by default: `serve` is the
+    /// headless/remote path (the native desktop app is the primary interface).
+    /// `MOOSEMAP_NO_OPEN` always disables opening regardless of this flag.
+    pub open_browser: bool,
 }
 
 impl Default for ServerConfig {
@@ -35,6 +39,7 @@ impl Default for ServerConfig {
             addr: "127.0.0.1:8080".parse().unwrap(),
             database_url: "sqlite://moosemap.db".to_string(),
             frontend_dir: Some(PathBuf::from("frontend/dist")),
+            open_browser: false,
         }
     }
 }
@@ -78,9 +83,11 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
     tracing::info!(addr = %local_addr, "MooseMap server listening");
 
     let url = browser_url(local_addr);
-    println!("\n  MooseMap is running — open {url}\n");
+    println!("\n  MooseMap server running — GUI at {url}\n");
 
-    if std::env::var_os("MOOSEMAP_NO_OPEN").is_none() {
+    // Only open a browser when explicitly asked (and never if NO_OPEN is set).
+    // Headless/remote is the common case for this mode.
+    if config.open_browser && std::env::var_os("MOOSEMAP_NO_OPEN").is_none() {
         open_browser(&url);
     }
 
@@ -184,6 +191,7 @@ mod tests {
             addr: "127.0.0.1:0".parse().unwrap(),
             database_url: "sqlite::memory:".into(),
             frontend_dir: None,
+            open_browser: false,
         };
         let url = serve_in_process(config).await.unwrap();
         assert!(url.starts_with("http://127.0.0.1:"));

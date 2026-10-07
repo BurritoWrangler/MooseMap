@@ -6,8 +6,10 @@ CIDR blocks, or FQDNs), and it drives a suite of recon and scanning tools throug
 a staged pipeline, tracks progress in real time, and produces a prioritized report
 of exploitable findings.
 
-It ships with a modern, accessible web GUI (React + TypeScript) backed by an
-async Rust engine (Tokio + axum) with live WebSocket status updates.
+MooseMap runs as a **native desktop application** (Tauri): a modern, accessible
+GUI (React + TypeScript) in its own window, backed by an async Rust engine
+(Tokio + axum) that runs in-process with live status updates. A headless
+server/CLI mode is also available for remote and automation use.
 
 > ## ⚠️ Authorized use only
 >
@@ -25,8 +27,9 @@ A Cargo workspace of focused crates:
 | `crates/core`        | Domain models, scope parsing, scope guard, pipeline engine, task tracking |
 | `crates/scanners`    | `StageExecutor` trait + tool adapters (nmap, subfinder, httpx, nuclei + version heuristics real; masscan stubbed) |
 | `crates/report`      | Prioritization scoring + JSON/Markdown report generation |
-| `crates/server`      | axum REST API + WebSocket live updates + SQLite persistence; serves the frontend |
-| `crates/cli`         | `clap` CLI to launch the server or run headless scans |
+| `crates/server`      | axum REST API + WebSocket live updates + SQLite persistence; serves the frontend (runs in-process inside the desktop app) |
+| `crates/cli`         | `clap` CLI for headless scans and the optional server mode |
+| `src-tauri/`         | **The desktop app** (Tauri): native window hosting the GUI + in-process server |
 | `frontend/`          | Vite + React + TypeScript accessible GUI |
 
 ### Pipeline stages
@@ -59,48 +62,27 @@ On macOS: `brew install nmap httpx nuclei subfinder`
 add a wildcard entry like `*.example.com` to include discovered subdomains, or
 they are dropped as out of scope.
 
-## Kali Quick Start
+## Kali notes
 
-Kali Linux is the recommended host. A helper script installs the scanning tools,
-Rust, and Node:
+Kali Linux is the recommended host. `make setup` (which runs
+`./scripts/setup-kali.sh --desktop`) installs the scanning tools, Rust, Node,
+and the Tauri desktop-build dependencies. Confirm tooling resolves with
+`make doctor` (or `cargo run -p moosemap-cli -- tools`).
 
-```bash
-./scripts/setup-kali.sh          # tools + Rust + Node (GUI)
-./scripts/setup-kali.sh --tools  # scanning tools only
-```
+Kali-specific details the doctor and adapters handle for you:
 
-Then confirm everything resolves correctly:
+- **`httpx` naming.** On Kali, ProjectDiscovery's httpx is packaged as
+  `httpx-toolkit` (the plain `httpx` is the unrelated Python client). MooseMap
+  **auto-detects `httpx-toolkit`** — no configuration needed. You can still pin a
+  specific binary with `MOOSEMAP_HTTPX`, and any tool with `MOOSEMAP_<TOOL>`
+  (e.g. `MOOSEMAP_NUCLEI`, `MOOSEMAP_SUBFINDER`).
 
-```bash
-cargo run -p moosemap-cli -- tools   # the "doctor": shows each tool's path + status
-```
-
-Kali-specific notes the doctor and adapters account for:
-
-- **`httpx` shadowing.** Kali may have a Python `httpx` HTTP-client CLI on
-  `PATH` that is **not** ProjectDiscovery's `httpx`. MooseMap verifies the binary
-  (`httpx -version`) and *skips with a clear message* rather than misparsing the
-  wrong tool. Install ProjectDiscovery's (`apt install httpx-toolkit`) or point
-  MooseMap at it explicitly:
-
-  ```bash
-  export MOOSEMAP_HTTPX="$(go env GOPATH)/bin/httpx"
-  ```
-
-  Any tool's binary can be overridden with `MOOSEMAP_<TOOL>` (e.g.
-  `MOOSEMAP_NUCLEI`, `MOOSEMAP_SUBFINDER`).
-
-- **Privileges.** `nmap`'s SYN scan and `masscan` need root/`CAP_NET_RAW`. Run
+- **Privileges.** `nmap`'s SYN scan and `masscan` need root/`CAP_NET_RAW`. Launch
   MooseMap with `sudo` for best results; unprivileged, nmap falls back to a TCP
   connect scan (slower, still works).
 
-- **nuclei templates.** The first run downloads templates. `setup-kali.sh` runs
+- **nuclei templates.** The first run downloads templates. `make setup` runs
   `nuclei -update-templates` for you; otherwise it happens mid-scan.
-
-- **Binding.** The server binds `127.0.0.1:8080` by default (localhost only). To
-  reach the GUI from your host machine, bind the VM's interface explicitly and
-  understand you are exposing the API:
-  `cargo run -p moosemap-cli -- serve --addr 0.0.0.0:8080`.
 
 ### How findings become "actionable"
 
@@ -119,97 +101,61 @@ report so the most practically exploitable items come first. The executive
 summary counts "actionable" items (Medium+ severity, or anything with a known
 exploit or referenced CVE).
 
-## Build & run
+## Install & run (desktop app)
 
-The GUI is the primary interface. The whole flow is three `make` targets:
+MooseMap is a **native desktop application**. It runs the whole engine in-process
+and shows its GUI in its own window — no browser, no terminal. Three `make`
+targets take you from a fresh Kali VM to an installed app:
 
 ```bash
-make setup    # install scanning tools, Rust, and Node (Kali/Debian)
-make build    # build the web GUI + the release binary
-make run      # launch the server and open the GUI in your browser
+make setup    # scanning tools + Rust + Node + desktop (Tauri) build deps
+make build    # build the standalone app bundle (.deb / AppImage)
+make run      # launch MooseMap in a native window
 ```
 
-`make run` serves the built GUI, prints a clickable URL, and opens your default
-browser. Set `MOOSEMAP_NO_OPEN=1` to skip auto-opening (headless/SSH/CI). Run
-`make help` to see all targets, and `make doctor` to check tool readiness from
-the terminal.
+`make build` produces an installable package under
+`src-tauri/target/release/bundle/`. Installing it (e.g. `sudo dpkg -i
+src-tauri/target/release/bundle/deb/*.deb`) drops **MooseMap** into your
+applications menu with its icon, like any other app — launch it from there and
+it opens in its own window. Closing the window stops everything (intentional for
+a scanning tool you don't want running unattended).
 
-### The workflow, in the GUI
+While developing the UI, `make dev` runs the app with a hot-reloading GUI.
 
-1. **Check readiness** — the sidebar's *Scanner readiness* panel shows which
-   tools are installed and resolve correctly (and flags the Kali `httpx`
-   shadowing problem) before you scan.
+### The workflow, in the app
+
+1. **Check readiness** — the *Scanner readiness* panel shows which tools are
+   installed and resolve correctly (and flags the Kali `httpx` shadowing
+   problem) before you scan.
 2. **Define scope & start** — enter authorized IPs/CIDRs/domains and launch.
-3. **Track live** — stages and findings stream in over WebSocket.
+3. **Track live** — stages and findings stream in in real time.
 4. **Export the report** — on a finished run, download the prioritized report
    as **Markdown** or **JSON** from the run header.
 
-### Native desktop app (own window, no browser)
+Run `make help` for all targets, and `make doctor` to check tool readiness from
+the terminal.
 
-MooseMap can run as a self-contained desktop application built with
-[Tauri](https://tauri.app): it starts the server **in-process** and shows the
-GUI in its own native window — no terminal, no separate browser tab.
+## Advanced: headless / remote mode
 
-```bash
-./scripts/setup-kali.sh --desktop   # WebKitGTK + build tools + tauri-cli
-make app-dev                        # run in dev mode (hot-reload GUI)
-make app-build                      # bundle a .deb / AppImage you can install
-```
-
-`make app-build` produces an installable package under
-`src-tauri/target/release/bundle/` that drops MooseMap into your applications
-menu with its icon, like any other app. Closing the window stops the embedded
-server (and the whole process) — intentional for a scanning tool.
-
-The desktop app reuses the exact same GUI, API, and live event stream as the
-server mode; it just hosts them in a window. `MOOSEMAP_DB` / `MOOSEMAP_ADDR`
-still apply if you want to point it at a specific database or port.
-
-### Lightweight menu launcher (browser-based)
-
-If you'd rather not build the native app, you can add a menu entry that starts
-the server and opens the GUI in your default browser:
+The same engine and GUI can run as a plain server with **no window** — useful on
+a headless VM you reach over SSH, where you'd forward a port and use a browser on
+your own machine:
 
 ```bash
-make build            # release binary + GUI
-make install-desktop  # add the menu entry + icon (user-level, no sudo)
-```
-
-This installs a launcher to `~/.local/bin`, the icon to the hicolor theme, and a
-`moosemap.desktop` entry to `~/.local/share/applications`. Clicking it opens a
-terminal that runs the server and launches the browser GUI; close it to stop.
-
-- System-wide (all users): `./scripts/install-desktop.sh --system` (uses sudo).
-- Remove it: `make uninstall-desktop`.
-
-### Three ways to run, summarized
-
-| Mode | Command | What you get |
-|---|---|---|
-| **Native desktop app** | `make app-build` then launch MooseMap | Own window, no browser/terminal |
-| **Menu launcher** | `make install-desktop` | Menu icon → terminal + browser GUI |
-| **Server / headless** | `make run` (or `moosemap serve`) | Browser GUI; good for remote/VM use |
-
-### Running without Make
-
-```bash
-cd frontend && npm install && npm run build && cd ..   # build GUI (Node 18+)
-cargo run -p moosemap-cli -- serve                     # serve + open browser
+make headless                       # builds the web GUI, then serves it
+# or directly:
+cargo run -p moosemap-cli -- serve --addr 0.0.0.0:8080 --open
 
 # Flags / env vars:
 #   --addr 127.0.0.1:8080                 (MOOSEMAP_ADDR)
 #   --database-url sqlite://moosemap.db   (MOOSEMAP_DB)
 #   --frontend-dir frontend/dist          (MOOSEMAP_FRONTEND)
-#   MOOSEMAP_NO_OPEN=1                    (don't auto-open the browser)
+#   --open                                launch a local browser (off by default)
 ```
 
-During frontend development, run the Vite dev server (which proxies `/api`
-and the WebSocket to the backend on `:8080`):
-
-```bash
-cargo run -p moosemap-cli -- serve           # terminal 1 (backend)
-cd frontend && npm run dev                    # terminal 2 (http://localhost:5173)
-```
+`serve` does not open a browser unless you pass `--open`; it just prints the URL.
+The desktop app is the normal way to use MooseMap — this mode is for remote/VM
+and automation use.
 
 ### Headless CLI scan
 
