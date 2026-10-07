@@ -66,9 +66,12 @@ pub fn run() -> anyhow::Result<()> {
         // Keep the runtime alive for the whole app lifetime.
         .manage(server_rt)
         .setup(move |app| {
-            // Create the main window pointing at the embedded server URL. We
-            // build it here (rather than from config) because the port is only
-            // known at runtime.
+            // Create the main window here, NOT in tauri.conf.json. The config
+            // declares no windows (`"windows": []`) on purpose: the window must
+            // point at the embedded server's URL, whose port is only known at
+            // runtime. If the config also declared a `main` window, Tauri would
+            // auto-create it at startup and this builder would then panic with
+            // "a webview with label `main` already exists".
             let win = WebviewWindowBuilder::new(
                 app,
                 "main",
