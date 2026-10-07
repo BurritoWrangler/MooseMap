@@ -195,14 +195,27 @@ cargo tauri icon assets/moosemap.svg --output src-tauri/icons \
 say "building the MooseMap desktop bundle (this can take a few minutes)…"
 cargo tauri build
 
-BUNDLE_DIR="src-tauri/target/release/bundle"
+# Determine Cargo's target directory. In this workspace the target dir is at the
+# repo root (./target), NOT src-tauri/target — ask Cargo rather than guessing.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
+  | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' | head -n1)"
+[ -n "$TARGET_DIR" ] || TARGET_DIR="$REPO/target"
 
-# Locate the produced .deb (name includes version + arch).
-DEB="$(find "$BUNDLE_DIR/deb" -maxdepth 1 -name '*.deb' -print 2>/dev/null | head -n1 || true)"
-APPIMAGE="$(find "$BUNDLE_DIR/appimage" -maxdepth 1 -name '*.AppImage' -print 2>/dev/null | head -n1 || true)"
+# Search the likely bundle roots (workspace target, plus the legacy
+# src-tauri/target in case of a non-workspace layout).
+DEB=""; APPIMAGE=""
+for root in "$TARGET_DIR/release/bundle" "$REPO/target/release/bundle" "$REPO/src-tauri/target/release/bundle"; do
+  [ -d "$root" ] || continue
+  [ -z "$DEB" ] && DEB="$(find "$root" -maxdepth 2 -name '*.deb' -print 2>/dev/null | head -n1 || true)"
+  [ -z "$APPIMAGE" ] && APPIMAGE="$(find "$root" -maxdepth 2 -name '*.AppImage' -print 2>/dev/null | head -n1 || true)"
+done
 
 if [ -z "$DEB" ] && [ -z "$APPIMAGE" ]; then
-  die "build finished but no .deb/.AppImage found under $BUNDLE_DIR"
+  warn "no .deb/.AppImage found under the expected bundle directories."
+  warn "searched: $TARGET_DIR/release/bundle (and repo/target, src-tauri/target)."
+  warn "list what the build produced with:"
+  echo "    find \"$TARGET_DIR/release/bundle\" -maxdepth 2 -type f 2>/dev/null"
+  die "build finished but no installable bundle was located"
 fi
 
 say "built:"
