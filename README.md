@@ -144,6 +144,24 @@ the terminal.
 4. **Export the report** — on a finished run, download the prioritized report
    as **Markdown** or **JSON** from the run header.
 
+### Install as a desktop app (menu icon)
+
+To launch MooseMap from the Kali applications menu instead of the terminal:
+
+```bash
+make build            # ensure the release binary + GUI are built
+make install-desktop  # add the menu entry + icon (user-level, no sudo)
+```
+
+This installs a launcher to `~/.local/bin`, the icon to the hicolor theme, and a
+`moosemap.desktop` entry to `~/.local/share/applications`, then refreshes the
+menu cache. Look for **MooseMap** in the Applications menu (under Security /
+Network). Clicking it opens a terminal that starts the server and launches the
+GUI in your browser; close that terminal (or Ctrl-C) to stop the server.
+
+- System-wide (all users): `./scripts/install-desktop.sh --system` (uses sudo).
+- Remove it: `make uninstall-desktop`.
+
 ### Running without Make
 
 ```bash

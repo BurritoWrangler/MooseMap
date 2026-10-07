@@ -44,6 +44,14 @@ run: ## Run the server (serves the GUI, opens a browser)
 	  $(BIN) serve --addr $(ADDR); \
 	fi
 
+.PHONY: install-desktop
+install-desktop: ## Add MooseMap to the applications menu (icon + launcher)
+	./scripts/install-desktop.sh
+
+.PHONY: uninstall-desktop
+uninstall-desktop: ## Remove the applications-menu entry
+	./scripts/install-desktop.sh --uninstall
+
 .PHONY: dev
 dev: ## Run backend (cargo) + frontend dev server; use two terminals
 	@echo "Terminal 1:  $(CARGO) run -p moosemap-cli -- serve"

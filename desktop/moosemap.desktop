@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=MooseMap
+GenericName=External Pentest Orchestrator
+Comment=Authorized external penetration testing with real-time tracking
+# __EXEC__ and __ICON__ are substituted with absolute paths by install-desktop.sh
+Exec=__EXEC__
+Icon=__ICON__
+Terminal=true
+Categories=Security;Network;System;
+Keywords=pentest;security;recon;scan;nmap;nuclei;httpx;subfinder;vulnerability;
+StartupNotify=false
+# For native Kali-menu integration (optional), the kali-menu package keys off
+# X-Kali-Package=<pkg> on entries in /usr/share/applications processed by
+# update-kali-menu. That path requires Kali packaging; the standard Categories
+# above are what place MooseMap in the Applications menu for a manual install.
