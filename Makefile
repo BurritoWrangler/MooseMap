@@ -32,6 +32,14 @@ build: ## Build the standalone desktop app bundle (.deb / AppImage)
 	@$(MAKE) app-icons || echo "continuing with existing icons"
 	$(CARGO) tauri build
 
+.PHONY: install
+install: ## Build AND install the app so it appears in the applications menu
+	./scripts/install-app.sh
+
+.PHONY: uninstall
+uninstall: ## Remove the installed MooseMap app
+	./scripts/install-app.sh --uninstall
+
 .PHONY: run
 run: ## Launch MooseMap in a native window
 	@if [ -x target/release/moosemap-desktop ]; then \

@@ -104,23 +104,31 @@ exploit or referenced CVE).
 ## Install & run (desktop app)
 
 MooseMap is a **native desktop application**. It runs the whole engine in-process
-and shows its GUI in its own window — no browser, no terminal. Three `make`
-targets take you from a fresh Kali VM to an installed app:
+and shows its GUI in its own window — no browser, no terminal.
+
+**One-command install** on a fresh Kali VM:
 
 ```bash
-make setup    # scanning tools + Rust + Node + desktop (Tauri) build deps
-make build    # build the standalone app bundle (.deb / AppImage)
-make run      # launch MooseMap in a native window
+./scripts/install-app.sh --setup
 ```
 
-`make build` produces an installable package under
-`src-tauri/target/release/bundle/`. Installing it (e.g. `sudo dpkg -i
-src-tauri/target/release/bundle/deb/*.deb`) drops **MooseMap** into your
-applications menu with its icon, like any other app — launch it from there and
-it opens in its own window. Closing the window stops everything (intentional for
-a scanning tool you don't want running unattended).
+That installs the build toolchain, builds the app bundle, and installs it so
+**MooseMap** appears in your applications menu with its icon. Launch it from
+there and it opens in its own window. (Drop `--setup` on later runs once the
+toolchain is in place; `make install` is the same as a no-setup run.)
 
-While developing the UI, `make dev` runs the app with a hot-reloading GUI.
+Prefer step-by-step? The equivalent `make` targets:
+
+```bash
+make setup      # scanning tools + Rust + Node + desktop (Tauri) build deps
+make install    # build the app bundle AND install it (menu entry + icon)
+make run        # launch MooseMap in a native window
+make build      # just build the bundle (no install) under src-tauri/target/...
+```
+
+Closing the window stops everything (intentional for a scanning tool you don't
+want running unattended). While developing the UI, `make dev` runs the app with
+a hot-reloading GUI, and `make uninstall` removes the installed package.
 
 ### The workflow, in the app
 
