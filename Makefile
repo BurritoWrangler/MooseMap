@@ -33,11 +33,15 @@ build: ## Build the standalone desktop app bundle (.deb / AppImage)
 	$(CARGO) tauri build
 
 .PHONY: install
-install: ## Build AND install the app so it appears in the applications menu
+install: ## Build AND install the app (.deb) so it appears in the applications menu
 	./scripts/install-app.sh
 
+.PHONY: install-appimage
+install-appimage: ## Build AND install the portable AppImage (user-level, no sudo)
+	./scripts/install-app.sh --appimage
+
 .PHONY: uninstall
-uninstall: ## Remove the installed MooseMap app
+uninstall: ## Remove the installed MooseMap app (.deb and/or AppImage)
 	./scripts/install-app.sh --uninstall
 
 .PHONY: run

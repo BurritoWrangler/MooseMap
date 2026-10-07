@@ -120,11 +120,24 @@ toolchain is in place; `make install` is the same as a no-setup run.)
 Prefer step-by-step? The equivalent `make` targets:
 
 ```bash
-make setup      # scanning tools + Rust + Node + desktop (Tauri) build deps
-make install    # build the app bundle AND install it (menu entry + icon)
-make run        # launch MooseMap in a native window
-make build      # just build the bundle (no install) under src-tauri/target/...
+make setup            # scanning tools + Rust + Node + desktop (Tauri) build deps
+make install          # build the app bundle AND install it (.deb; menu entry + icon)
+make install-appimage # build AND install the portable AppImage (user-level, no sudo)
+make run              # launch MooseMap in a native window
+make build            # just build the bundle (no install) under src-tauri/target/...
 ```
+
+On non-Debian hosts (or if you'd rather not use `dpkg`/sudo), install the
+**portable AppImage** instead — it drops a single executable into `~/.local/bin`
+plus a menu entry, no package manager required:
+
+```bash
+./scripts/install-app.sh --appimage          # add --setup on a fresh machine
+```
+
+The installer also falls back to the AppImage automatically if no `.deb` can be
+installed. `make uninstall` (or `./scripts/install-app.sh --uninstall`) removes
+whichever form you installed.
 
 Closing the window stops everything (intentional for a scanning tool you don't
 want running unattended). While developing the UI, `make dev` runs the app with
