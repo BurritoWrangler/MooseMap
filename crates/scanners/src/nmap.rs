@@ -103,17 +103,21 @@ pub fn parse_nmap_xml(xml: &str) -> anyhow::Result<Vec<NmapHost>> {
                                 Some("udp") => Protocol::Udp,
                                 _ => Protocol::Tcp,
                             };
-                            let portid = attr(&e, b"portid")
+                            // Skip ports with a missing/invalid portid rather
+                            // than recording a bogus port 0.
+                            if let Some(portid) = attr(&e, b"portid")
                                 .and_then(|s| s.parse::<u16>().ok())
-                                .unwrap_or(0);
-                            h.ports.push(NmapPort {
-                                portid,
-                                protocol,
-                                state: PortState::Filtered,
-                                service_name: None,
-                                product: None,
-                                version: None,
-                            });
+                                .filter(|&p| p != 0)
+                            {
+                                h.ports.push(NmapPort {
+                                    portid,
+                                    protocol,
+                                    state: PortState::Filtered,
+                                    service_name: None,
+                                    product: None,
+                                    version: None,
+                                });
+                            }
                         }
                     }
                     b"state" => {
@@ -314,6 +318,14 @@ impl StageExecutor for NmapPortScan {
             }
             for p in &h.ports {
                 if p.state == PortState::Open {
+                    // Dedup on (target, port, protocol) so a re-scan or a host
+                    // reported twice doesn't create duplicate service rows.
+                    let dup = state.services.iter().any(|s| {
+                        s.target == target && s.port == p.portid && s.protocol == p.protocol
+                    });
+                    if dup {
+                        continue;
+                    }
                     open += 1;
                     state.services.push(Service {
                         target: target.clone(),
@@ -357,20 +369,19 @@ impl StageExecutor for NmapServiceEnum {
             return Ok(StageOutcome::Skipped("nmap not installed".into()));
         }
 
-        // Build a target->ports map from discovered services.
-        let service_snapshot: Vec<Service> = {
-            let state = ctx.state.lock().await;
-            state.services.clone()
-        };
-        if service_snapshot.is_empty() {
-            return Ok(StageOutcome::Skipped("no open ports to enumerate".into()));
-        }
-
-        // Group ports per target for a focused -sV scan.
+        // Group ports per target for a focused -sV scan, built directly from the
+        // locked state (no full Vec<Service> clone — just the target->ports map).
         use std::collections::BTreeMap;
-        let mut by_target: BTreeMap<String, Vec<u16>> = BTreeMap::new();
-        for s in &service_snapshot {
-            by_target.entry(s.target.to_string()).or_default().push(s.port);
+        let by_target: BTreeMap<String, Vec<u16>> = {
+            let state = ctx.state.lock().await;
+            let mut map: BTreeMap<String, Vec<u16>> = BTreeMap::new();
+            for s in &state.services {
+                map.entry(s.target.to_string()).or_default().push(s.port);
+            }
+            map
+        };
+        if by_target.is_empty() {
+            return Ok(StageOutcome::Skipped("no open ports to enumerate".into()));
         }
 
         let mut updated = 0usize;

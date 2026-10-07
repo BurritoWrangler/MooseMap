@@ -17,7 +17,7 @@
 
 use crate::tool;
 use moosemap_core::engine::{async_trait, StageContext, StageExecutor, StageOutcome};
-use moosemap_core::model::{Exploitability, Finding, Severity, Stage, Target};
+use moosemap_core::model::{parse_host_port, Exploitability, Finding, Severity, Stage, Target};
 use std::collections::BTreeSet;
 
 const NUCLEI: &str = "nuclei";
@@ -58,7 +58,11 @@ pub fn exploitability_of(m: &NucleiMatch) -> Exploitability {
     if is_kev {
         return Exploitability::Active;
     }
-    if !m.cves.is_empty() || tags_lower.iter().any(|t| t.starts_with("cve")) {
+    // A concrete CVE reference => public PoC likely. `m.cves` is already
+    // populated strictly (classification cve-id, or a `CVE-` prefixed tag), so
+    // we rely on it rather than a loose `starts_with("cve")` that would also
+    // match unrelated tags like `cvss`.
+    if !m.cves.is_empty() {
         return Exploitability::ProofOfConcept;
     }
     Exploitability::Theoretical
@@ -169,35 +173,14 @@ pub fn parse_nuclei_line(line: &str) -> Option<NucleiMatch> {
     })
 }
 
-/// Map a nuclei match's host back to a core [`Target`] (prefer IP) plus the
-/// port if one can be derived from the host string or its scheme.
+/// Map a nuclei match's host back to a core [`Target`] plus optional port.
+///
+/// Delegates to the shared [`parse_host_port`] parser so URLs, `host:port`,
+/// bare/bracketed IPv6, and scheme-implied ports are all handled consistently
+/// with the web-recon stage (and so a legitimate IPv6 result is never silently
+/// dropped by a mis-parse).
 fn match_target(host: &str) -> Option<(Target, Option<u16>)> {
-    // host can be "https://1.2.3.4:443", "1.2.3.4:443", "example.com", etc.
-    let scheme_default_port = if host.starts_with("https://") {
-        Some(443u16)
-    } else if host.starts_with("http://") {
-        Some(80u16)
-    } else {
-        None
-    };
-    let stripped = host
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    let hostpart = stripped.split('/').next().unwrap_or(stripped);
-    // Split host:port, being careful not to misread an IPv6 literal.
-    let (bare, port) = match hostpart.rsplit_once(':') {
-        Some((h, p)) if !h.contains(':') => (h, p.parse::<u16>().ok()),
-        _ => (hostpart, None),
-    };
-    if bare.is_empty() {
-        return None;
-    }
-    let port = port.or(scheme_default_port);
-    let target = match bare.parse() {
-        Ok(ip) => Target::Ip(ip),
-        Err(_) => Target::Host(bare.to_string()),
-    };
-    Some((target, port))
+    parse_host_port(host)
 }
 
 /// Vulnerability scanning via nuclei.
@@ -335,6 +318,16 @@ mod tests {
     }
 
     #[test]
+    fn cvss_like_tags_do_not_imply_poc() {
+        // A tag that merely starts with "cv" (e.g. "cvss") must NOT bump a
+        // finding to proof-of-concept — only a real CVE reference does.
+        let line = r#"{"template-id":"panel","info":{"name":"Panel","severity":"medium","tags":["cvss","panel"]},"host":"1.2.3.4:443"}"#;
+        let m = parse_nuclei_line(line).unwrap();
+        assert!(m.cves.is_empty());
+        assert_eq!(exploitability_of(&m), Exploitability::Theoretical);
+    }
+
+    #[test]
     fn match_target_handles_urls_and_hostports() {
         assert_eq!(
             match_target("https://192.0.2.10:8080"),
@@ -353,6 +346,16 @@ mod tests {
         assert_eq!(
             match_target("example.com"),
             Some((Target::Host("example.com".into()), None))
+        );
+        // IPv6: bracketed with port, and bare — both resolve to an IP target
+        // (previously the bracketed form was silently dropped as out-of-scope).
+        assert_eq!(
+            match_target("https://[2001:db8::1]:8443"),
+            Some((Target::Ip("2001:db8::1".parse().unwrap()), Some(8443)))
+        );
+        assert_eq!(
+            match_target("2001:db8::1"),
+            Some((Target::Ip("2001:db8::1".parse().unwrap()), None))
         );
     }
 

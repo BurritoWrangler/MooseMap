@@ -13,7 +13,7 @@
 use crate::tool;
 use moosemap_core::engine::{async_trait, StageContext, StageExecutor, StageOutcome};
 use moosemap_core::model::{
-    Exploitability, Finding, Service, Severity, Stage, Target, WebEndpoint,
+    parse_host_port, Exploitability, Finding, Service, Severity, Stage, WebEndpoint,
 };
 use std::collections::BTreeSet;
 
@@ -114,28 +114,28 @@ pub fn parse_httpx_line(line: &str) -> Option<WebEndpoint> {
         });
 
     // Host: httpx reports `host` (resolved) and/or `input`; prefer input which
-    // mirrors what we fed in, so the target matches our scope entries.
-    let host = v
+    // mirrors what we fed in, so the target matches our scope entries. Parse via
+    // the shared authority parser so IPv6 (incl. bracketed `[::1]:443`) is
+    // handled correctly rather than split on the first colon.
+    let authority = v
         .get("input")
         .and_then(|x| x.as_str())
         .or_else(|| v.get("host").and_then(|x| x.as_str()))
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .to_string();
+        .unwrap_or("");
+    let (target, parsed_port) = parse_host_port(authority)?;
 
-    let port = v
-        .get("port")
-        .and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
-        .map(|p| p as u16)
-        .unwrap_or_else(|| if scheme == "https" { 443 } else { 80 });
-
-    let target = match host.parse() {
-        Ok(ip) => Target::Ip(ip),
-        Err(_) if !host.is_empty() => Target::Host(host),
-        Err(_) => return None,
-    };
+    // Prefer an explicit, in-range `port` field; else the one parsed from the
+    // authority; else the scheme default. A port > 65535 in the JSON is ignored
+    // rather than wrapped.
+    let explicit_port = v.get("port").and_then(|x| {
+        x.as_u64()
+            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+            .filter(|&n| n >= 1 && n <= u16::MAX as u64)
+            .map(|n| n as u16)
+    });
+    let port = explicit_port
+        .or(parsed_port)
+        .unwrap_or(if scheme == "https" { 443 } else { 80 });
 
     let mut ep = WebEndpoint::new(target, port, scheme, url);
     ep.status_code = v
@@ -277,7 +277,7 @@ impl StageExecutor for HttpxWebRecon {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use moosemap_core::model::{PortState, Protocol};
+    use moosemap_core::model::{PortState, Protocol, Target};
 
     #[test]
     fn parses_httpx_line() {
@@ -396,5 +396,22 @@ mod tests {
         let line = r#"{"url":"http://legacy.example.com","host":"legacy.example.com","port":80}"#;
         let ep = parse_httpx_line(line).unwrap();
         assert_eq!(ep.target, Target::Host("legacy.example.com".into()));
+    }
+
+    #[test]
+    fn parses_bracketed_ipv6_endpoint() {
+        // httpx reports IPv6 authorities in bracketed form.
+        let line = r#"{"url":"https://[2001:db8::1]:8443","input":"[2001:db8::1]:8443","port":8443,"scheme":"https"}"#;
+        let ep = parse_httpx_line(line).unwrap();
+        assert_eq!(ep.target, Target::Ip("2001:db8::1".parse().unwrap()));
+        assert_eq!(ep.port, 8443);
+    }
+
+    #[test]
+    fn out_of_range_port_does_not_wrap() {
+        // 70000 must not wrap to 4464; falls back to the authority/scheme port.
+        let line = r#"{"url":"https://example.com","input":"example.com","port":70000,"scheme":"https"}"#;
+        let ep = parse_httpx_line(line).unwrap();
+        assert_eq!(ep.port, 443); // scheme default, NOT 70000 % 65536
     }
 }

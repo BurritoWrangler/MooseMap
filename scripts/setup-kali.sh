@@ -154,7 +154,15 @@ install_desktop_deps() {
     libssl-dev \
     libayatana-appindicator3-dev \
     librsvg2-dev librsvg2-bin \
+    libfuse2 \
     || warn "some Tauri system deps failed to install"
+
+  # AppImages need FUSE2 at runtime. libfuse2 covers it on current Kali; if the
+  # AppImage still fails with 'dlopen(): libfuse.so.2', run it with
+  # '--appimage-extract-and-run', or install your distro's fuse2 package.
+  if ! have fusermount && ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+    warn "FUSE2 not detected; the AppImage may need '--appimage-extract-and-run'."
+  fi
 
   # Tauri CLI (provides `cargo tauri dev|build|icon`).
   if cargo tauri --version >/dev/null 2>&1; then

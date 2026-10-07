@@ -21,7 +21,7 @@ pub mod scope;
 pub use engine::{Engine, RunResult, RunState, StageContext, StageExecutor, StageOutcome};
 pub use event::{EngineEvent, LogLevel};
 pub use model::{
-    Exploitability, Finding, PortState, Protocol, Run, RunStatus, Service, Severity,
-    Stage, Target, Task, TaskStatus, WebEndpoint,
+    parse_host_port, Exploitability, Finding, PortState, Protocol, Run, RunStatus,
+    Service, Severity, Stage, Target, Task, TaskStatus, WebEndpoint,
 };
 pub use scope::{OutOfScope, ScopeEntry, ScopeError, ScopeGuard};

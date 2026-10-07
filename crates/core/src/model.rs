@@ -26,6 +26,86 @@ impl fmt::Display for Target {
     }
 }
 
+/// Parse a tool-reported authority (`host[:port]`, optionally scheme/path-wrapped)
+/// into a [`Target`] plus an optional port.
+///
+/// Handles the shapes external tools (nmap/httpx/nuclei) emit:
+/// - `https://[2001:db8::1]:8443/path` → `(Ip(2001:db8::1), Some(8443))`
+/// - `[2001:db8::1]:443`               → `(Ip(2001:db8::1), Some(443))`
+/// - `2001:db8::1`                      → `(Ip(2001:db8::1), None)`
+/// - `192.0.2.10:8080`                  → `(Ip(192.0.2.10), Some(8080))`
+/// - `http://example.com/x`             → `(Host(example.com), Some(80))` via scheme
+/// - `example.com`                      → `(Host(example.com), None)`
+///
+/// IPv6 is parsed correctly: a *bracketed* host carries an optional `:port`
+/// suffix, while a bare colon-bearing string with no brackets is treated as a
+/// whole IPv6 address (never split on its internal colons). Ports outside
+/// `1..=65535` are rejected (returned as `None`) rather than silently wrapping.
+///
+/// Returns `None` only if no usable host remains after parsing.
+pub fn parse_host_port(input: &str) -> Option<(Target, Option<u16>)> {
+    let s = input.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Derive a default port from the scheme, then strip scheme + any path.
+    let scheme_port = if s.starts_with("https://") {
+        Some(443u16)
+    } else if s.starts_with("http://") {
+        Some(80u16)
+    } else {
+        None
+    };
+    let authority = s
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    if authority.is_empty() {
+        return None;
+    }
+
+    // Helper: validate and parse a port string into 1..=65535.
+    fn parse_port(p: &str) -> Option<u16> {
+        p.parse::<u16>().ok().filter(|&n| n != 0)
+    }
+
+    let (host_str, port): (&str, Option<u16>) = if let Some(rest) = authority.strip_prefix('[') {
+        // Bracketed IPv6: "[addr]" or "[addr]:port".
+        match rest.split_once(']') {
+            Some((addr, after)) => {
+                let port = after
+                    .strip_prefix(':')
+                    .and_then(parse_port);
+                (addr, port)
+            }
+            None => (authority, None), // malformed; treat whole thing as host
+        }
+    } else if authority.matches(':').count() >= 2 {
+        // Multiple colons, no brackets → a bare IPv6 address (no port).
+        (authority, None)
+    } else {
+        // host:port or bare host (IPv4 / hostname).
+        match authority.rsplit_once(':') {
+            Some((h, p)) => (h, parse_port(p)),
+            None => (authority, None),
+        }
+    };
+
+    if host_str.is_empty() {
+        return None;
+    }
+
+    let target = match host_str.parse::<std::net::IpAddr>() {
+        Ok(ip) => Target::Ip(ip),
+        Err(_) => Target::Host(host_str.to_ascii_lowercase()),
+    };
+
+    Some((target, port.or(scheme_port)))
+}
+
 /// Transport protocol for a port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -382,5 +462,81 @@ impl Run {
             created_at: now,
             updated_at: now,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ip(s: &str) -> Target {
+        Target::Ip(s.parse().unwrap())
+    }
+
+    #[test]
+    fn parses_ipv4_with_and_without_port() {
+        assert_eq!(parse_host_port("192.0.2.10:8080"), Some((ip("192.0.2.10"), Some(8080))));
+        assert_eq!(parse_host_port("192.0.2.10"), Some((ip("192.0.2.10"), None)));
+    }
+
+    #[test]
+    fn parses_scheme_and_path() {
+        assert_eq!(
+            parse_host_port("https://example.com/admin"),
+            Some((Target::Host("example.com".into()), Some(443)))
+        );
+        assert_eq!(
+            parse_host_port("http://192.0.2.5"),
+            Some((ip("192.0.2.5"), Some(80)))
+        );
+        // Explicit port beats the scheme default.
+        assert_eq!(
+            parse_host_port("https://example.com:8443/x"),
+            Some((Target::Host("example.com".into()), Some(8443)))
+        );
+    }
+
+    #[test]
+    fn parses_bare_ipv6() {
+        assert_eq!(parse_host_port("2001:db8::1"), Some((ip("2001:db8::1"), None)));
+    }
+
+    #[test]
+    fn parses_bracketed_ipv6_with_port() {
+        assert_eq!(
+            parse_host_port("[2001:db8::1]:8443"),
+            Some((ip("2001:db8::1"), Some(8443)))
+        );
+        assert_eq!(
+            parse_host_port("https://[2001:db8::1]:8443/path"),
+            Some((ip("2001:db8::1"), Some(8443)))
+        );
+        // Bracketed with no port.
+        assert_eq!(
+            parse_host_port("[fe80::1]"),
+            Some((ip("fe80::1"), None))
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_and_zero_ports() {
+        // 70000 must NOT wrap to 4464 — it's rejected (port None), host kept.
+        assert_eq!(parse_host_port("192.0.2.10:70000"), Some((ip("192.0.2.10"), None)));
+        assert_eq!(parse_host_port("192.0.2.10:0"), Some((ip("192.0.2.10"), None)));
+    }
+
+    #[test]
+    fn hostname_lowercased() {
+        assert_eq!(
+            parse_host_port("API.Example.COM:443"),
+            Some((Target::Host("api.example.com".into()), Some(443)))
+        );
+    }
+
+    #[test]
+    fn empty_is_none() {
+        assert_eq!(parse_host_port(""), None);
+        assert_eq!(parse_host_port("   "), None);
+        assert_eq!(parse_host_port("http://"), None);
     }
 }
