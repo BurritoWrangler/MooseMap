@@ -161,7 +161,7 @@ impl Engine {
         let mut tasks: BTreeMap<Stage, Task> = BTreeMap::new();
         let mut run_failed = false;
 
-        for &stage in Stage::ordered() {
+        for &stage in Stage::engine_stages() {
             let mut task = Task::new(run_id, stage);
             task.status = TaskStatus::Running;
             task.started_at = Some(Utc::now());
@@ -318,8 +318,9 @@ mod tests {
 
         assert_eq!(result.status, RunStatus::Completed);
         assert_eq!(result.findings.len(), 1);
-        // All 7 stages produce a task.
-        assert_eq!(result.tasks.len(), Stage::ordered().len());
+        // The engine produces a task per engine-owned stage (prioritize/report
+        // are handled post-engine by the orchestrator, not here).
+        assert_eq!(result.tasks.len(), Stage::engine_stages().len());
 
         // We should have received a RunStatusChanged(Running) first.
         let first = rx.try_recv().unwrap();
@@ -338,7 +339,7 @@ mod tests {
             .iter()
             .filter(|t| t.status == TaskStatus::Skipped)
             .count();
-        // Every stage except Discovery has no executor -> skipped.
-        assert_eq!(skipped, Stage::ordered().len() - 1);
+        // Every engine-owned stage except Discovery has no executor -> skipped.
+        assert_eq!(skipped, Stage::engine_stages().len() - 1);
     }
 }

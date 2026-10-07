@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use moosemap_core::engine::Engine;
 use moosemap_core::event::EngineEvent;
-use moosemap_core::model::{Run, RunStatus};
+use moosemap_core::model::{Run, RunStatus, Stage, Task, TaskStatus};
 use moosemap_core::scope::ScopeGuard;
 use moosemap_report::{prioritize, Report};
 use tokio::sync::broadcast;
@@ -128,6 +129,47 @@ impl Orchestrator {
     }
 }
 
+/// Emit a stage task event for a post-engine stage (Prioritize/Report): persist
+/// it to the store and broadcast it to WebSocket clients, so both the live GUI
+/// and a later REST fetch show the stage with the given status. These stages are
+/// handled here rather than by the engine (see [`Stage::engine_stages`]).
+#[allow(clippy::too_many_arguments)]
+async fn emit_stage_task(
+    store: &Store,
+    bus: &broadcast::Sender<EngineEvent>,
+    run_id: Uuid,
+    task_id: Uuid,
+    stage: Stage,
+    status: TaskStatus,
+    message: Option<String>,
+) {
+    let now = Utc::now();
+    // Reuse a stable task_id across the running->done transition so upsert_task
+    // updates one row rather than creating duplicates.
+    let task = Task {
+        id: task_id,
+        run_id,
+        stage,
+        status,
+        message: message.clone(),
+        started_at: Some(now),
+        finished_at: if matches!(status, TaskStatus::Done | TaskStatus::Failed) {
+            Some(now)
+        } else {
+            None
+        },
+    };
+    let _ = store.upsert_task(&task).await;
+    let _ = bus.send(EngineEvent::TaskStatusChanged {
+        run_id,
+        task_id,
+        stage,
+        status,
+        message,
+        at: now,
+    });
+}
+
 /// Drives one run: subscribes to engine events, mirrors them to the store and
 /// the server bus, runs the engine, then persists prioritized results.
 async fn run_pipeline(
@@ -140,6 +182,10 @@ async fn run_pipeline(
     let run_id = run.id;
     let engine = Engine::new(executors, 1024);
     let mut rx = engine.subscribe();
+
+    // Keep a sender clone for the post-engine (Prioritize/Report) stage events;
+    // the relay task below takes ownership of `bus`.
+    let post_bus = bus.clone();
 
     // Relay task: forward engine events to the server bus + persist them.
     let store_relay = store.clone();
@@ -180,16 +226,49 @@ async fn run_pipeline(
         }
     });
 
-    // Run the engine to completion.
+    // Run the engine (scanning stages) to completion.
     let result = engine.run(&run, scope).await;
 
-    // Prioritize findings and persist services + final findings.
+    // --- Prioritize stage (post-engine; emits its own task events) -----------
+    let prioritize_task = Uuid::new_v4();
+    emit_stage_task(&store, &post_bus, run_id, prioritize_task, Stage::Prioritize,
+        TaskStatus::Running, None).await;
+
     let mut findings = result.findings;
     prioritize::prioritize(&mut findings);
-    store.replace_services(run_id, &result.services).await?;
-    for f in &findings {
-        store.insert_finding(run_id, f).await?;
+    let prioritize_result = async {
+        store.replace_services(run_id, &result.services).await?;
+        for f in &findings {
+            store.insert_finding(run_id, f).await?;
+        }
+        anyhow::Ok(())
     }
+    .await;
+
+    if let Err(e) = &prioritize_result {
+        emit_stage_task(&store, &post_bus, run_id, prioritize_task, Stage::Prioritize,
+            TaskStatus::Failed, Some(e.to_string())).await;
+        store.update_run_status(run_id, RunStatus::Failed).await?;
+        drop(engine);
+        let _ = relay.await;
+        return Err(anyhow::anyhow!("prioritize/persist failed: {e}"));
+    }
+    let actionable = findings.iter().filter(|f| prioritize::is_actionable(f)).count();
+    emit_stage_task(&store, &post_bus, run_id, prioritize_task, Stage::Prioritize,
+        TaskStatus::Done,
+        Some(format!("{} finding(s), {actionable} actionable", findings.len()))).await;
+
+    // --- Report stage (post-engine) ------------------------------------------
+    let report_task = Uuid::new_v4();
+    emit_stage_task(&store, &post_bus, run_id, report_task, Stage::Report,
+        TaskStatus::Running, None).await;
+    // The report is built on demand from persisted data; confirm it builds so
+    // the stage reflects a genuinely available report.
+    let report_ok = Report::build(&run, result.services.clone(), findings.clone());
+    emit_stage_task(&store, &post_bus, run_id, report_task, Stage::Report,
+        TaskStatus::Done,
+        Some(format!("report ready ({} services)", report_ok.services.len()))).await;
+
     store.update_run_status(run_id, result.status).await?;
 
     // Ensure the relay drains remaining buffered events, then finish.

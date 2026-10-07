@@ -334,7 +334,7 @@ pub enum Stage {
 }
 
 impl Stage {
-    /// Canonical execution order.
+    /// The full, canonical pipeline order (used for display/tracking).
     pub fn ordered() -> &'static [Stage] {
         &[
             Stage::Discovery,
@@ -345,6 +345,28 @@ impl Stage {
             Stage::Prioritize,
             Stage::Report,
         ]
+    }
+
+    /// The stages the pipeline *engine* runs via [`crate::StageExecutor`]s.
+    ///
+    /// Prioritization and reporting are deliberately excluded: they run after
+    /// the engine completes (in the orchestrator), which owns the run's storage
+    /// and report context. The engine therefore only iterates these stages, and
+    /// the orchestrator emits the Prioritize/Report task events itself.
+    pub fn engine_stages() -> &'static [Stage] {
+        &[
+            Stage::Discovery,
+            Stage::PortScan,
+            Stage::ServiceEnum,
+            Stage::WebRecon,
+            Stage::VulnScan,
+        ]
+    }
+
+    /// True if this stage is executed by the engine (vs. handled post-engine
+    /// by the orchestrator, as Prioritize and Report are).
+    pub fn is_engine_owned(self) -> bool {
+        Stage::engine_stages().contains(&self)
     }
 }
 
