@@ -284,3 +284,55 @@ async fn cve_correlation_emits_prioritized_cve_finding() {
     prioritize::prioritize(&mut findings);
     assert!(findings[0].title.contains("CVE-2011-2523"));
 }
+
+// ---------------------------------------------------------------------------
+// TLS + content-discovery adapters skip gracefully when their tools are absent
+// (sslscan/feroxbuster aren't installed in CI), and the pipeline still completes.
+// ---------------------------------------------------------------------------
+
+use moosemap_scanners::content::ContentDiscovery;
+use moosemap_scanners::tls::SslscanTls;
+
+/// Seeds an HTTPS service so the TLS adapter has something to consider.
+struct FakeTlsService;
+
+#[async_trait]
+impl StageExecutor for FakeTlsService {
+    fn stage(&self) -> Stage {
+        Stage::ServiceEnum
+    }
+    fn name(&self) -> &str {
+        "fake-tls-service"
+    }
+    async fn execute(&self, ctx: &StageContext) -> anyhow::Result<StageOutcome> {
+        let mut st = ctx.state.lock().await;
+        st.services.push(Service {
+            target: Target::Ip("192.0.2.60".parse().unwrap()),
+            port: 443,
+            protocol: Protocol::Tcp,
+            state: PortState::Open,
+            service_name: Some("https".into()),
+            product: Some("nginx".into()),
+            version: Some("1.24.0".into()),
+        });
+        Ok(StageOutcome::Completed)
+    }
+}
+
+#[tokio::test]
+async fn tls_and_content_adapters_integrate_without_tools() {
+    // Neither sslscan nor feroxbuster is installed in CI; both adapters must
+    // skip gracefully and the run must still complete.
+    let engine = Engine::new(
+        vec![
+            Arc::new(FakeTlsService),
+            Arc::new(SslscanTls),
+            Arc::new(ContentDiscovery),
+        ],
+        128,
+    );
+    let run = Run::new("tls", vec!["192.0.2.0/24".into()]);
+    let scope = Arc::new(ScopeGuard::from_input("192.0.2.0/24").unwrap());
+    let result = engine.run(&run, scope).await;
+    assert_eq!(result.status, moosemap_core::RunStatus::Completed);
+}

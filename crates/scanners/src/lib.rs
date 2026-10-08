@@ -10,6 +10,8 @@
 //! - [`nuclei`] — template-based vulnerability scanning of web endpoints.
 //! - [`heuristics`] — version-based vuln heuristics (no external tool required).
 //! - [`cve`] — curated offline CVE correlation from service version banners.
+//! - [`tls`] — TLS/SSL analysis via sslscan (protocols, ciphers, certificates).
+//! - [`content`] — web content/path discovery via feroxbuster.
 //!
 //! ## Planned (stubbed, skip gracefully)
 //! - [`stubs::MasscanPortScan`] (high-rate port sweeping).
@@ -25,8 +27,10 @@ pub mod heuristics;
 pub mod httpx;
 pub mod nmap;
 pub mod nuclei;
+pub mod content;
 pub mod stubs;
 pub mod subfinder;
+pub mod tls;
 pub mod tool;
 pub mod version;
 
@@ -46,10 +50,13 @@ pub fn default_executors() -> Vec<Arc<dyn StageExecutor>> {
         // Port scan
         Arc::new(nmap::NmapPortScan::default()),
         Arc::new(stubs::MasscanPortScan),
-        // Service enumeration
+        // Service enumeration: nmap -sV, then TLS analysis on TLS-bearing ports.
         Arc::new(nmap::NmapServiceEnum),
-        // Web recon
+        Arc::new(tls::SslscanTls),
+        // Web recon: httpx confirms live endpoints, then content discovery
+        // probes them for interesting paths (conservative rate caps).
         Arc::new(httpx::HttpxWebRecon),
+        Arc::new(content::ContentDiscovery),
         // Vulnerability scanning: real scanner first, then always-on offline
         // checks (version heuristics + curated CVE correlation). CVE
         // correlation runs after nuclei so it can dedup against nuclei's
@@ -64,7 +71,7 @@ pub fn default_executors() -> Vec<Arc<dyn StageExecutor>> {
 
 /// Report which known external tools are available on this host.
 pub fn tool_availability() -> Vec<(&'static str, bool)> {
-    ["nmap", "masscan", "subfinder", "httpx", "nuclei"]
+    ["nmap", "masscan", "subfinder", "httpx", "nuclei", "sslscan", "feroxbuster"]
         .into_iter()
         .map(|t| (t, tool::is_installed(t)))
         .collect()
@@ -150,6 +157,18 @@ pub async fn tool_report() -> Vec<ToolStatus> {
             "sudo apt install -y nuclei && nuclei -update-templates",
         )
         .await,
+        plain(
+            "sslscan",
+            "TLS/SSL analysis (protocols, ciphers, certs)",
+            "sudo apt install -y sslscan",
+            "",
+        ),
+        plain(
+            "feroxbuster",
+            "web content/path discovery (active — rate-capped)",
+            "sudo apt install -y feroxbuster",
+            " (active scanning; conservative defaults, override wordlist via MOOSEMAP_WORDLIST)",
+        ),
     ]
 }
 

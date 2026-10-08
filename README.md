@@ -51,7 +51,15 @@ failed / skipped). Status changes are broadcast over WebSocket for live tracking
   - [`subfinder`](https://github.com/projectdiscovery/subfinder) — **implemented** (passive subdomain enumeration)
   - [`httpx`](https://github.com/projectdiscovery/httpx) — **implemented** (web recon)
   - [`nuclei`](https://github.com/projectdiscovery/nuclei) — **implemented** (vulnerability scanning)
+  - [`sslscan`](https://github.com/rbsec/sslscan) — **implemented** (TLS/SSL analysis)
+  - [`feroxbuster`](https://github.com/epi052/feroxbuster) — **implemented** (web content discovery; active, rate-capped)
   - `masscan` — stubbed, planned
+
+Offline, no-tool checks also run: **version heuristics** and **curated CVE
+correlation** (version-banner → known CVEs, with EPSS/KEV). Content discovery is
+**active** scanning — it only runs against httpx-confirmed endpoints, with
+conservative rate caps; set `MOOSEMAP_WORDLIST` to use a larger list (e.g.
+SecLists).
 
 Version-based vulnerability heuristics run with **no external tool required**,
 so you still get actionable vuln signal from service banners even without nuclei.

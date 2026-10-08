@@ -53,9 +53,14 @@ apt_install() {
 # External scanning tools
 # ---------------------------------------------------------------------------
 install_scanning_tools() {
-  # nmap + masscan are in the Kali/Debian repos.
-  have nmap    || apt_install nmap    || warn "could not install nmap"
-  have masscan || apt_install masscan || warn "could not install masscan"
+  # nmap + masscan + sslscan + feroxbuster are in the Kali/Debian repos.
+  have nmap        || apt_install nmap        || warn "could not install nmap"
+  have masscan     || apt_install masscan     || warn "could not install masscan"
+  have sslscan     || apt_install sslscan     || warn "could not install sslscan"
+  have feroxbuster || apt_install feroxbuster || warn "could not install feroxbuster"
+  # SecLists provides larger wordlists for content discovery (optional; point
+  # MOOSEMAP_WORDLIST at one, e.g. /usr/share/seclists/Discovery/Web-Content/...).
+  apt_install seclists || warn "could not install seclists (optional wordlists)"
 
   # ProjectDiscovery tools: try apt first (Kali packages them), then go install.
   install_pd_tool subfinder \
